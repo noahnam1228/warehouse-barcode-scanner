@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Warehouse Barcode Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+  <style>
+    :root{--navy:#12366b;--red:#a3211a;--bg:#0d1117;--text:#fff;--muted:#c8d1dc}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}
+    header{padding:16px 18px;background:var(--navy)}
+    header h1{margin:0;font-size:21px}
+    header p{margin:5px 0 0;font-size:12px;opacity:.85}
+    main{max-width:760px;margin:auto;padding:14px}
+    #scanner{
+      position:relative;width:100%;aspect-ratio:3/4;max-height:72vh;
+      overflow:hidden;border-radius:16px;background:#000
+    }
+    #scanner video,#scanner canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+    .guide{
+      position:absolute;left:8%;right:8%;top:39%;height:22%;
+      border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 9999px #0007;
+      pointer-events:none;z-index:10
+    }
+    .line{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#ff4b3e;z-index:11}
+    .status{margin-top:12px;padding:12px;border-radius:11px;background:#18202b;font-size:14px;line-height:1.4}
+    .hint{color:var(--muted);font-size:13px;margin-top:10px;line-height:1.5}
+    .manual{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:12px}
+    .manual input{padding:13px;border:0;border-radius:10px;font-size:15px;font-family:Consolas,monospace;text-transform:uppercase}
+    .manual button,.retry{border:0;border-radius:10px;padding:0 16px;font-weight:800}
+    .manual button{background:#fff;color:#111}
+    .retry{width:100%;padding:13px;margin-top:10px;background:var(--navy);color:#fff}
+  </style>
+</head>
+<body>
+<header>
+  <h1>WAREHOUSE BARCODE SCANNER</h1>
+  <p>Point the camera at the LNE pallet barcode.</p>
+</header>
+
+<main>
+  <div id="scanner">
+    <div class="guide"></div>
+    <div class="line"></div>
+  </div>
+
+  <div id="status" class="status">Starting camera…</div>
+  <div class="hint">
+    Keep the long 1D barcode horizontal and fill most of the guide box.
+    Only pallet codes beginning with <b>LNE-</b> are accepted.
+  </div>
+
+  <div class="manual">
+    <input id="manual" placeholder="LNE-0001-...">
+    <button id="manualBtn" type="button">USE</button>
+  </div>
+
+  <button id="retry" class="retry" type="button" style="display:none">RESTART CAMERA</button>
+</main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const returnUrl = params.get("return") || "";
+let finished = false;
+let lastCandidate = "";
+let lastCandidateAt = 0;
+
+function setStatus(t){ document.getElementById("status").textContent=t; }
+
+function normalize(v){
+  return String(v||"").trim().toUpperCase().replace(/\s+/g,"");
+}
+
+function finish(code){
+  if(finished) return;
+  code = normalize(code);
+  if(!code.startsWith("LNE-")){
+    setStatus("Not a pallet barcode: " + code);
+    return;
+  }
+  finished = true;
+  setStatus("Barcode read: " + code);
+  if(navigator.vibrate) navigator.vibrate(120);
+
+  try{ Quagga.stop(); }catch(e){}
+
+  if(returnUrl){
+    const u = new URL(returnUrl);
+    u.searchParams.set("code", code);
+    location.replace(u.toString());
+  }else{
+    setStatus("Barcode read: " + code + " (return URL missing)");
+  }
+}
+
+function startScanner(){
+  finished = false;
+  document.getElementById("retry").style.display="none";
+  setStatus("Starting camera…");
+
+  Quagga.init({
+    inputStream:{
+      name:"Live",
+      type:"LiveStream",
+      target:document.querySelector("#scanner"),
+      constraints:{
+        facingMode:{ideal:"environment"},
+        width:{ideal:1920},
+        height:{ideal:1080}
+      },
+      area:{top:"32%",right:"7%",left:"7%",bottom:"32%"}
+    },
+    locator:{patchSize:"medium",halfSample:false},
+    numOfWorkers: navigator.hardwareConcurrency ? Math.min(4,navigator.hardwareConcurrency) : 2,
+    frequency:12,
+    decoder:{
+      readers:["code_128_reader","code_39_reader"],
+      multiple:false
+    },
+    locate:true
+  }, err=>{
+    if(err){
+      console.error(err);
+      setStatus("Camera could not start. Allow camera access in the browser, then tap RESTART CAMERA.");
+      document.getElementById("retry").style.display="block";
+      return;
+    }
+    Quagga.start();
+    setStatus("Camera ready — scan the LNE pallet barcode.");
+  });
+}
+
+Quagga.onDetected(result=>{
+  const raw = result && result.codeResult ? result.codeResult.code : "";
+  const code = normalize(raw);
+  if(!code) return;
+
+  // Require the same candidate twice within 1.5 s to reduce false reads.
+  const now = Date.now();
+  if(code === lastCandidate && now - lastCandidateAt < 1500){
+    finish(code);
+  }else{
+    lastCandidate = code;
+    lastCandidateAt = now;
+    if(code.startsWith("LNE-")) setStatus("Hold steady… " + code);
+  }
+});
+
+document.getElementById("manualBtn").addEventListener("click",()=>{
+  finish(document.getElementById("manual").value);
+});
+document.getElementById("manual").addEventListener("keydown",e=>{
+  if(e.key==="Enter") document.getElementById("manualBtn").click();
+});
+document.getElementById("retry").addEventListener("click",()=>{
+  try{Quagga.stop()}catch(e){}
+  startScanner();
+});
+
+startScanner();
+</script>
+</body>
+</html>
