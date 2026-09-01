@@ -31,13 +31,12 @@
     .manual button,.retry{border:0;border-radius:10px;padding:0 16px;font-weight:800}
     .manual button{background:#fff;color:#111}
     .retry{width:100%;padding:13px;margin-top:10px;background:var(--navy);color:#fff}
+    .langbtn{border:1px solid #ffffff55;background:#ffffff18;color:#fff;border-radius:7px;padding:6px 8px;font-size:10px;font-weight:900}
+    .langbtn.active{background:#fff;color:var(--navy);border-color:#fff}
   </style>
 </head>
 <body>
-<header>
-  <h1>WAREHOUSE PDF417 SCANNER</h1>
-  <p>Live camera scanner for pallet PDF417 barcodes.</p>
-</header>
+<header><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><h1>WAREHOUSE PDF417 SCANNER</h1><p id="subTitle"></p></div><div style="display:flex;gap:4px"><button class="langbtn" data-lang="ko" type="button">한국어</button><button class="langbtn" data-lang="en" type="button">EN</button><button class="langbtn" data-lang="es" type="button">ES</button></div></div></header>
 
 <main>
   <div id="scanner">
@@ -47,23 +46,27 @@
   </div>
 
   <div id="status" class="status">Starting camera…</div>
-  <div class="hint">
-    Keep the PDF417 symbol flat and centered inside the box. Fill as much of the box as possible and avoid glare.
-    The scanner extracts the <b>LNE-...</b> pallet number from the decoded data.
-  </div>
+<div class="hint" id="scanHint"></div>
 
   <div class="manual">
     <input id="manual" placeholder="LNE-0001-...">
-    <button id="manualBtn" type="button">USE</button>
+    <button id="manualBtn" type="button"></button>
   </div>
 
-  <button id="retry" class="retry" type="button" style="display:none">RESTART CAMERA</button>
+  <button id="retry" class="retry" type="button" style="display:none"></button>
 </main>
 
 <script>
-const params = new URLSearchParams(location.search);
-const returnUrl = params.get("return") || "";
-
+const params=new URLSearchParams(location.search);const returnUrl=params.get("return")||"";const LANG_KEY="warehouse_scanner_lang";
+const S={
+ ko:{sub:"팔렛 PDF417 실시간 카메라 스캐너",starting:"카메라 시작 중...",ready:"카메라 준비 완료 — PDF417 팔렛 바코드를 스캔하세요.",hint:"PDF417 바코드를 평평하게 펴서 박스 중앙에 맞추세요. 화면을 최대한 채우고 빛 반사를 피하세요. 스캔 데이터에서 <b>LNE-...</b> 팔렛 번호를 추출합니다.",use:"사용",restart:"카메라 다시 시작",noLne:"PDF417은 읽었지만 유효한 LNE 팔렛 번호를 찾지 못했습니다.",hold:"조금만 그대로 유지하세요…",read:"바코드 인식 완료",cameraFail:"카메라/스캐너를 시작할 수 없습니다. 카메라 접근을 허용한 뒤 다시 시작하세요."},
+ en:{sub:"Live camera scanner for pallet PDF417 barcodes",starting:"Starting camera...",ready:"Camera ready — scan the PDF417 pallet barcode.",hint:"Keep the PDF417 symbol flat and centered inside the box. Fill as much of the box as possible and avoid glare. The scanner extracts the <b>LNE-...</b> pallet number from the decoded data.",use:"USE",restart:"RESTART CAMERA",noLne:"PDF417 decoded, but no valid LNE pallet number was found.",hold:"Hold steady…",read:"Barcode read",cameraFail:"Camera/scanner could not start. Allow camera access, then restart the camera."},
+ es:{sub:"Escáner en vivo para códigos PDF417 de pallets",starting:"Iniciando cámara...",ready:"Cámara lista — escanee el código PDF417 del pallet.",hint:"Mantenga el código PDF417 plano y centrado dentro del recuadro. Llene la mayor parte del recuadro y evite reflejos. El escáner extrae el número de pallet <b>LNE-...</b> de los datos.",use:"USAR",restart:"REINICIAR CÁMARA",noLne:"Se leyó el PDF417, pero no se encontró un número de pallet LNE válido.",hold:"Mantenga estable…",read:"Código leído",cameraFail:"No se pudo iniciar la cámara/escáner. Permita el acceso a la cámara y vuelva a intentarlo."}
+};
+function initialLang(){const q=(params.get("lang")||"").toLowerCase();if(S[q])return q;try{const x=localStorage.getItem(LANG_KEY);if(S[x])return x}catch(e){}const b=(navigator.language||"en").toLowerCase();if(b.startsWith("es"))return"es";if(b.startsWith("ko"))return"ko";return"en"}
+let LANG=initialLang();function st(k){return(S[LANG]&&S[LANG][k])||S.en[k]||k}
+function applyLang(lang){if(!S[lang])return;LANG=lang;document.documentElement.lang=lang;try{localStorage.setItem(LANG_KEY,lang)}catch(e){}document.querySelectorAll(".langbtn").forEach(b=>b.classList.toggle("active",b.dataset.lang===lang));document.getElementById("subTitle").textContent=st("sub");document.getElementById("scanHint").innerHTML=st("hint");document.getElementById("manualBtn").textContent=st("use");document.getElementById("retry").textContent=st("restart")}
+document.querySelectorAll(".langbtn").forEach(b=>b.addEventListener("click",()=>applyLang(b.dataset.lang)));
 let controls = null;
 let finished = false;
 let lastCode = "";
@@ -112,18 +115,19 @@ function finish(code){
   code = String(code || "").trim().toUpperCase();
 
   if(!code.startsWith("LNE-")){
-    setStatus("Decoded, but no valid LNE pallet number was found.");
+    setStatus(st("noLne"));
     return;
   }
 
   finished = true;
-  setStatus("Barcode read: " + code);
+  setStatus(st("read")+": "+code);
   if(navigator.vibrate) navigator.vibrate(120);
   stopCamera();
 
   if(returnUrl){
     const u = new URL(returnUrl);
     u.searchParams.set("code", code);
+    u.searchParams.set("lang", LANG);
     location.replace(u.toString());
   }else{
     setStatus("Barcode read: " + code + " (return URL missing)");
@@ -133,7 +137,7 @@ function finish(code){
 async function startScanner(){
   finished = false;
   document.getElementById("retry").style.display = "none";
-  setStatus("Starting camera…");
+  setStatus(st("starting"));
 
   try{
     if(!window.ZXingBrowser || !ZXingBrowser.BrowserPDF417Reader){
@@ -162,7 +166,7 @@ async function startScanner(){
         const code = extractPalletCode(raw);
 
         if(!code){
-          setStatus("PDF417 decoded, but no LNE number found. Raw data: " + raw.slice(0,160));
+          setStatus(st("noLne"));
           return;
         }
 
@@ -174,15 +178,15 @@ async function startScanner(){
         }else{
           lastCode = code;
           lastCodeAt = now;
-          setStatus("Hold steady… " + code);
+          setStatus(st("hold")+" "+code);
         }
       }
     );
 
-    setStatus("Camera ready — scan the PDF417 pallet barcode.");
+    setStatus(st("ready"));
   }catch(err){
     console.error(err);
-    setStatus("Camera/scanner could not start. Allow camera access and tap RESTART CAMERA.");
+    setStatus(st("cameraFail"));
     document.getElementById("retry").style.display = "block";
   }
 }
@@ -201,6 +205,7 @@ document.getElementById("retry").addEventListener("click",()=>{
 });
 
 window.addEventListener("pagehide", stopCamera);
+applyLang(LANG);
 startScanner();
 </script>
 </body>
